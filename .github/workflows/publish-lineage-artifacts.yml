@@ -1,0 +1,82 @@
+# Demo publisher adapted for offline compilation (no BigQuery credentials required).
+# Set repository variable LINEAGE_SITE_REPOSITORY and secret LINEAGE_DISPATCH_TOKEN.
+name: Publish dbt artifacts
+'on':
+  push:
+    branches:
+    - main
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      DATASEAM_REPO: ${{ github.server_url }}/${{ github.repository }}
+      DATASEAM_REF: ${{ github.ref_name }}
+      DATASEAM_COMMIT: ${{ github.sha }}
+      DATASEAM_PROJECT: acme_mart
+    steps:
+    - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@v7.1.0
+      with:
+        python-version: '3.12'
+    - name: Generate dbt artifacts offline
+      run: |
+        python -m pip install 'dbt-core~=1.10.0' 'dbt-bigquery~=1.10.0'
+        python -m pip install 'dataseam @ git+https://github.com/jyanagii/dataseam.git@8b58901d408be32d5d55fc55914a119e163c2afe'
+        dataseam impact-compile . -o target --platform bigquery --force-incremental \
+          --target-name prod \
+          --profile-override "database=acme-analytics-prod" \
+          --profile-override "schema=mart"
+        python - <<'PY'
+        import json
+        import os
+        from datetime import UTC, datetime
+        from pathlib import Path
+
+        target = Path("target")
+        if not (target / "manifest.json").is_file():
+            raise SystemExit("dataseam impact-compile did not produce target/manifest.json")
+        if not (target / "catalog.json").is_file():
+            (target / "catalog.json").write_text('{"nodes": {}, "sources": {}}\n', encoding="utf-8")
+        metadata = {
+            "project": os.environ["DATASEAM_PROJECT"],
+            "repo": os.environ["DATASEAM_REPO"],
+            "ref": os.environ["DATASEAM_REF"],
+            "commit": os.environ["DATASEAM_COMMIT"],
+            "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        (target / "lineage-meta.json").write_text(json.dumps(metadata) + "\n", encoding="utf-8")
+        PY
+    - uses: actions/upload-artifact@v7.0.2
+      with:
+        name: dbt-artifacts
+        path: |-
+          target/manifest.json
+          target/catalog.json
+          target/lineage-meta.json
+        if-no-files-found: error
+    - name: Upload SHA-keyed impact base artifact
+      uses: actions/upload-artifact@v7.0.2
+      with:
+        name: dataseam-compile-acme_mart-${{ github.sha }}
+        path: |-
+          target/manifest.json
+          target/catalog.json
+        retention-days: 14
+        if-no-files-found: error
+    - name: Trigger the aggregate build
+      if: ${{ vars.LINEAGE_SITE_REPOSITORY != '' && secrets.LINEAGE_DISPATCH_TOKEN != '' }}
+      env:
+        LINEAGE_SITE_REPOSITORY: ${{ vars.LINEAGE_SITE_REPOSITORY }}
+        LINEAGE_DISPATCH_TOKEN: ${{ secrets.LINEAGE_DISPATCH_TOKEN }}
+      run: |
+        curl --fail-with-body --silent --show-error --request POST \
+          --header "Authorization: Bearer $LINEAGE_DISPATCH_TOKEN" \
+          --header "Accept: application/vnd.github+json" \
+          --header "X-GitHub-Api-Version: 2022-11-28" \
+          --data '{"event_type":"artifacts-updated"}' \
+          "https://api.github.com/repos/$LINEAGE_SITE_REPOSITORY/dispatches"

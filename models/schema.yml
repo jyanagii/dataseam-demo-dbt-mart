@@ -1,0 +1,17 @@
+version: 2
+
+models:
+  - name: daily_sales
+    description: Daily order counts and revenue by country.
+    columns:
+      - name: order_date
+      - name: country
+      - name: order_count
+      - name: total_amount
+  - name: customer_ltv
+    description: Lifetime order volume and spend per customer.
+    columns:
+      - name: customer_id
+      - name: country
+      - name: lifetime_orders
+      - name: lifetime_value

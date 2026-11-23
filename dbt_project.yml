@@ -1,0 +1,8 @@
+name: acme_mart
+version: "1.0.0"
+profile: acme_mart
+model-paths: ["models"]
+clean-targets: ["target", "dbt_packages"]
+models:
+  acme_mart:
+    +materialized: table
