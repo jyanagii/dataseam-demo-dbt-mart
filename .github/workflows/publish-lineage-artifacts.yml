@@ -69,11 +69,15 @@ jobs:
         retention-days: 14
         if-no-files-found: error
     - name: Trigger the aggregate build
-      if: ${{ vars.LINEAGE_SITE_REPOSITORY != '' && secrets.LINEAGE_DISPATCH_TOKEN != '' }}
+      if: ${{ vars.LINEAGE_SITE_REPOSITORY != '' }}
       env:
         LINEAGE_SITE_REPOSITORY: ${{ vars.LINEAGE_SITE_REPOSITORY }}
         LINEAGE_DISPATCH_TOKEN: ${{ secrets.LINEAGE_DISPATCH_TOKEN }}
       run: |
+        if [ -z "$LINEAGE_DISPATCH_TOKEN" ]; then
+          echo "LINEAGE_DISPATCH_TOKEN is not set; skipping dispatch."
+          exit 0
+        fi
         curl --fail-with-body --silent --show-error --request POST \
           --header "Authorization: Bearer $LINEAGE_DISPATCH_TOKEN" \
           --header "Accept: application/vnd.github+json" \
